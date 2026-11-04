@@ -47,6 +47,10 @@ for each release.
   have a verifiable certificate chain and matching hostname.
 - Email templates do not load the upstream hosted logo by default; a controlled
   URL can be supplied through `QUESTFLOW_EMAIL_LOGO_URL`.
+- The GCS storage configuration omits explicit credentials when no key file is
+  configured or present, allowing the SDK to use Application Default
+  Credentials. GKE Workload Identity, file access, and signed URLs require
+  separate IAM configuration and have not yet been verified on GCP.
 
 The test-only Stripe proxy is enabled only if both `QUESTFLOW_LAGO_POC=true` and
 `QUESTFLOW_STRIPE_PROXY` are set. Do not use that proxy or test credentials in

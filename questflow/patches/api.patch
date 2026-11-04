@@ -1,5 +1,5 @@
 diff --git a/.dockerignore b/.dockerignore
-index 0622cae02..89b24f05a 100644
+index 0622cae02b6c37f944aaf281fb5913a8f8d790c0..89b24f05aacc4dfb59c221c23649a10fd50dcb2b 100644
 --- a/.dockerignore
 +++ b/.dockerignore
 @@ -1,4 +1,18 @@
@@ -30,7 +30,7 @@ index 0622cae02..89b24f05a 100644
  CONTRIBUTING.md
  SECURITY.md
 diff --git a/Dockerfile b/Dockerfile
-index 0b56c569b..fd34dc9d8 100644
+index 0b56c569b579476c914adee474daad12195317db..fd34dc9d8fe38905e89bc40c5d7f79b5373fd9fb 100644
 --- a/Dockerfile
 +++ b/Dockerfile
 @@ -1,4 +1,4 @@
@@ -92,7 +92,7 @@ index 0b56c569b..fd34dc9d8 100644
  ENTRYPOINT []
  
 diff --git a/app/graphql/concerns/authenticable_admin_user.rb b/app/graphql/concerns/authenticable_admin_user.rb
-index ea15b3d68..376caa669 100644
+index ea15b3d68e86acfdd8f2e1861cb62aeb3bf4347c..376caa66983d5ed157d8085ea5cc04366af62cf0 100644
 --- a/app/graphql/concerns/authenticable_admin_user.rb
 +++ b/app/graphql/concerns/authenticable_admin_user.rb
 @@ -16,7 +16,9 @@ module AuthenticableAdminUser
@@ -107,7 +107,7 @@ index ea15b3d68..376caa669 100644
  
      super
 diff --git a/app/mailers/application_mailer.rb b/app/mailers/application_mailer.rb
-index 96e09b001..166655634 100644
+index 96e09b00187ebe55f5ce433b26a62778f4f21bc2..166655634539568fec1221b3ded994a25400b433 100644
 --- a/app/mailers/application_mailer.rb
 +++ b/app/mailers/application_mailer.rb
 @@ -8,8 +8,8 @@ class ApplicationMailer < ActionMailer::Base
@@ -122,7 +122,7 @@ index 96e09b001..166655634 100644
    end
  
 diff --git a/config/initializers/analytics_ruby.rb b/config/initializers/analytics_ruby.rb
-index cc637a8ca..803e720af 100644
+index cc637a8cad71b301c455f67bcdcf4b35000d6053..803e720af0f588fa73e6886dc1c7a2993512c0df 100644
 --- a/config/initializers/analytics_ruby.rb
 +++ b/config/initializers/analytics_ruby.rb
 @@ -1,25 +1,4 @@
@@ -154,7 +154,7 @@ index cc637a8ca..803e720af 100644
 +# Questflow fork: Segment jobs check this flag before reporting analytics.
 +ENV["LAGO_DISABLE_SEGMENT"] = "true"
 diff --git a/config/initializers/license.rb b/config/initializers/license.rb
-index 1aa7bae4b..373f9af0a 100644
+index 1aa7bae4b946d0adf21f9668761a85f7b5c4016b..373f9af0aed487d05e0bea07bdc50c71e52a8297 100644
 --- a/config/initializers/license.rb
 +++ b/config/initializers/license.rb
 @@ -4,4 +4,9 @@ require "lago_utils"
@@ -169,7 +169,7 @@ index 1aa7bae4b..373f9af0a 100644
 +  License.verify unless Rails.env.test?
 +end
 diff --git a/config/initializers/open_telemetry.rb b/config/initializers/open_telemetry.rb
-index e744394bc..51a8c6fbc 100644
+index e744394bc1a1769dcf7c96e08772964b038eac5c..51a8c6fbcdfd714446f2a650fbd857c07e426a67 100644
 --- a/config/initializers/open_telemetry.rb
 +++ b/config/initializers/open_telemetry.rb
 @@ -1,13 +1,6 @@
@@ -188,7 +188,7 @@ index e744394bc..51a8c6fbc 100644
 +# Keep the tracer API available without installing an exporter.
  LagoTracer = OpenTelemetry.tracer_provider.tracer("lago")
 diff --git a/config/initializers/sentry.rb b/config/initializers/sentry.rb
-index 7769c47fc..03a63a116 100644
+index 7769c47fca3e930ce5d46089de3aa0991cf06779..03a63a116b6e60854cdc46ee8064f3359bc50664 100644
 --- a/config/initializers/sentry.rb
 +++ b/config/initializers/sentry.rb
 @@ -1,20 +1,3 @@
@@ -215,7 +215,7 @@ index 7769c47fc..03a63a116 100644
 +# Questflow fork: do not initialize the Sentry client.
 diff --git a/config/initializers/zz_questflow_stripe_test_proxy.rb b/config/initializers/zz_questflow_stripe_test_proxy.rb
 new file mode 100644
-index 000000000..2da1b82c9
+index 0000000000000000000000000000000000000000..2da1b82c9236f26321c831dc3192dd33a58b1e64
 --- /dev/null
 +++ b/config/initializers/zz_questflow_stripe_test_proxy.rb
 @@ -0,0 +1,7 @@
@@ -226,8 +226,25 @@ index 000000000..2da1b82c9
 +if ENV["QUESTFLOW_LAGO_POC"] == "true" && ENV["QUESTFLOW_STRIPE_PROXY"].present?
 +  Stripe.proxy = ENV.fetch("QUESTFLOW_STRIPE_PROXY")
 +end
+diff --git a/config/storage.yml b/config/storage.yml
+index c89fe1208a6a26d678e3f1732c18e2397cc75b94..8085c20d12597525b89cb58c144ca6b728faffba 100644
+--- a/config/storage.yml
++++ b/config/storage.yml
+@@ -25,7 +25,11 @@ amazon_compatible_endpoint:
+ 
+ google:
+   service: GCS
+-  credentials: <%= ENV.fetch('LAGO_GCS_KEYFILE_JSON_PATH', Rails.root.join('gcs_keyfile.json')) %>
++<% if ENV['LAGO_GCS_KEYFILE_JSON_PATH'].present? %>
++  credentials: <%= ENV['LAGO_GCS_KEYFILE_JSON_PATH'].to_json %>
++<% elsif Rails.root.join('gcs_keyfile.json').file? %>
++  credentials: <%= Rails.root.join('gcs_keyfile.json').to_s.to_json %>
++<% end %>
+   iam: <%= ENV.fetch('LAGO_GCS_IAM', false) %>
+   gsa_email: <%= ENV.fetch('LAGO_GCS_GSA_EMAIL', nil) %>
+   project: <%= ENV['LAGO_GCS_PROJECT'] %>
 diff --git a/lib/lago/diagnostics.rb b/lib/lago/diagnostics.rb
-index 92bbade3d..60ed39eab 100644
+index 92bbade3db261af8cd0054714ab9a78b954f9027..60ed39eab68045116c33da96e6c9a77422edb4ae 100644
 --- a/lib/lago/diagnostics.rb
 +++ b/lib/lago/diagnostics.rb
 @@ -480,7 +480,7 @@ module Lago
@@ -240,7 +257,7 @@ index 92bbade3d..60ed39eab 100644
  
          output.puts
 diff --git a/lib/lago/redis_config_builder.rb b/lib/lago/redis_config_builder.rb
-index 46e8f3d2e..27d53ac35 100644
+index 46e8f3d2e1f48b3094c0108c724f6f7dcca87648..27d53ac35f7c9116eee603ef10bffb04b1cb27b6 100644
 --- a/lib/lago/redis_config_builder.rb
 +++ b/lib/lago/redis_config_builder.rb
 @@ -71,7 +71,7 @@ module Lago
