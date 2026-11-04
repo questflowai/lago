@@ -1,0 +1,42 @@
+# Build the reviewed fork commit from public source without uploading a local
+# working directory or runtime secrets to Cloud Build. Override all three
+# substitutions with release-specific values.
+steps:
+  - name: gcr.io/cloud-builders/git
+    args:
+      - clone
+      - https://github.com/questflowai/lago.git
+      - /workspace/lago
+  - name: gcr.io/cloud-builders/git
+    dir: lago
+    args:
+      - checkout
+      - --detach
+      - ${_REVISION}
+  - name: gcr.io/cloud-builders/git
+    dir: lago
+    entrypoint: bash
+    args:
+      - ./questflow/apply-fork.sh
+  - name: gcr.io/cloud-builders/docker
+    dir: lago
+    args:
+      - build
+      - --platform=linux/amd64
+      - --tag=${_API_IMAGE}
+      - ./api
+  - name: gcr.io/cloud-builders/docker
+    dir: lago
+    args:
+      - build
+      - --platform=linux/amd64
+      - --tag=${_FRONT_IMAGE}
+      - ./front
+images:
+  - ${_API_IMAGE}
+  - ${_FRONT_IMAGE}
+substitutions:
+  _REVISION: REPLACE_WITH_REVIEWED_COMMIT
+  _API_IMAGE: REPLACE_WITH_API_IMAGE
+  _FRONT_IMAGE: REPLACE_WITH_FRONT_IMAGE
+timeout: 3600s

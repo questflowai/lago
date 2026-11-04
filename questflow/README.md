@@ -20,6 +20,13 @@ docker buildx build --platform linux/amd64 --tag "$API_IMAGE" --push ./api
 docker buildx build --platform linux/amd64 --tag "$FRONT_IMAGE" --push ./front
 ```
 
+`cloudbuild.yaml` provides a source-free Cloud Build option: it clones a
+reviewed commit, applies the pinned patches, builds `linux/amd64` images and
+publishes them to the supplied Artifact Registry image references. Override
+`_REVISION`, `_API_IMAGE`, and `_FRONT_IMAGE` with release-specific values.
+Ensure the Cloud Build service account has the required registry permissions.
+The build is not a production deployment and must be validated before use.
+
 The patches preserve the upstream submodule revisions in the enclosing commit.
 After an upstream update, review and rebase the patches before building. Keep
 the upstream licenses and notices and retain the corresponding patched source
