@@ -1,5 +1,5 @@
 diff --git a/.dockerignore b/.dockerignore
-index c567ec2e0..454c47fe7 100644
+index c567ec2..454c47f 100644
 --- a/.dockerignore
 +++ b/.dockerignore
 @@ -8,8 +8,16 @@ dist
@@ -19,8 +19,28 @@ index c567ec2e0..454c47fe7 100644
  .vscode
  .cursor
  .env.template
+diff --git a/.env.sh b/.env.sh
+index d5cf4a4..e6b1373 100755
+--- a/.env.sh
++++ b/.env.sh
+@@ -40,6 +40,7 @@ domain_value=$(echo $LAGO_DOMAIN)
+ app_env_value=$(echo $APP_ENV)
+ lago_oauth_proxy_url_value=$(echo $LAGO_OAUTH_PROXY_URL)
+ lago_disable_signup_value=$(echo $LAGO_DISABLE_SIGNUP)
++lago_disable_sso_value=$(echo $LAGO_DISABLE_SSO)
+ nango_public_key=$(echo $NANGO_PUBLIC_KEY)
+ sentry_dsn_value=$(echo $SENTRY_DSN)
+ lago_disable_pdf_generation=$(echo $LAGO_DISABLE_PDF_GENERATION)
+@@ -50,6 +51,7 @@ echo "window.LAGO_DOMAIN = \"$domain_value\"" >> ./env-config.js
+ echo "window.APP_ENV = \"$app_env_value\"" >> ./env-config.js
+ echo "window.LAGO_OAUTH_PROXY_URL = \"$lago_oauth_proxy_url_value\"" >> ./env-config.js
+ echo "window.LAGO_DISABLE_SIGNUP = \"$lago_disable_signup_value\"" >> ./env-config.js
++echo "window.LAGO_DISABLE_SSO = \"$lago_disable_sso_value\"" >> ./env-config.js
+ echo "window.NANGO_PUBLIC_KEY = \"$nango_public_key\"" >> ./env-config.js
+ echo "window.SENTRY_DSN = \"$sentry_dsn_value\"" >> ./env-config.js
+ echo "window.LAGO_DISABLE_PDF_GENERATION = \"$lago_disable_pdf_generation\"" >> ./env-config.js
 diff --git a/Dockerfile b/Dockerfile
-index b3a327eb7..e0c9840a5 100644
+index b3a327e..e0c9840 100644
 --- a/Dockerfile
 +++ b/Dockerfile
 @@ -1,4 +1,4 @@
@@ -50,8 +70,32 @@ index b3a327eb7..e0c9840a5 100644
  
  
  # --- runtime stage: hardened Wolfi nginx -------------------------------------
+diff --git a/globals.d.ts b/globals.d.ts
+index be99319..6d4d8d8 100644
+--- a/globals.d.ts
++++ b/globals.d.ts
+@@ -11,6 +11,7 @@ declare var LAGO_DOMAIN: string
+ declare var APP_VERSION: string
+ declare var LAGO_OAUTH_PROXY_URL: string
+ declare var LAGO_DISABLE_SIGNUP: string
++declare var LAGO_DISABLE_SSO: string
+ declare var NANGO_PUBLIC_KEY: string
+ declare var SENTRY_DSN: string
+ declare var LAGO_DISABLE_PDF_GENERATION: string
+diff --git a/jest.config.ts b/jest.config.ts
+index 90b9d37..e6304d0 100644
+--- a/jest.config.ts
++++ b/jest.config.ts
+@@ -84,6 +84,7 @@ export default {
+     IS_REACT_ACT_ENVIRONMENT: true,
+     LAGO_OAUTH_PROXY_URL: 'https://proxy.lago.dev',
+     LAGO_DISABLE_SIGNUP: 'false',
++    LAGO_DISABLE_SSO: 'false',
+     NANGO_PUBLIC_KEY: '',
+     SENTRY_DSN: 'https://sentry.io/',
+     LAGO_DISABLE_PDF_GENERATION: 'false',
 diff --git a/package.json b/package.json
-index e2d42f7f6..e39ef9c3e 100644
+index e2d42f7..e39ef9c 100644
 --- a/package.json
 +++ b/package.json
 @@ -196,13 +196,6 @@
@@ -69,7 +113,7 @@ index e2d42f7f6..e39ef9c3e 100644
      "node": "24.22.1"
    },
 diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
-index 249995e5a..88dcc8e55 100644
+index 249995e..88dcc8e 100644
 --- a/pnpm-workspace.yaml
 +++ b/pnpm-workspace.yaml
 @@ -2,6 +2,11 @@ packages:
@@ -85,7 +129,7 @@ index 249995e5a..88dcc8e55 100644
  # (10080 minutes) before any resolution installs it. Applied at the package
  # manager level so it also covers Renovate's weekly lockFileMaintenance
 diff --git a/src/components/admin/AdminGuard.tsx b/src/components/admin/AdminGuard.tsx
-index 9baa29226..8e3e9e802 100644
+index 9baa292..8e3e9e8 100644
 --- a/src/components/admin/AdminGuard.tsx
 +++ b/src/components/admin/AdminGuard.tsx
 @@ -7,7 +7,7 @@ const AdminGuard = () => {
@@ -97,8 +141,28 @@ index 9baa29226..8e3e9e802 100644
      return <Navigate to="/404" replace />
    }
  
+diff --git a/src/core/apolloClient/reactiveVars/envGlobalVar.ts b/src/core/apolloClient/reactiveVars/envGlobalVar.ts
+index 0893499..31ba271 100644
+--- a/src/core/apolloClient/reactiveVars/envGlobalVar.ts
++++ b/src/core/apolloClient/reactiveVars/envGlobalVar.ts
+@@ -7,6 +7,7 @@ interface EnvGlobal {
+   apiUrl: string
+   lagoOauthProxyUrl: string
+   disableSignUp: boolean
++  disableSso: boolean
+   appVersion: string
+   nangoPublicKey: string
+   sentryDsn: string
+@@ -25,6 +26,7 @@ export const envGlobalVar = makeVar<EnvGlobal>({
+   appEnv: window.APP_ENV || APP_ENV,
+   lagoOauthProxyUrl: window.LAGO_OAUTH_PROXY_URL || LAGO_OAUTH_PROXY_URL,
+   disableSignUp: (window.LAGO_DISABLE_SIGNUP || LAGO_DISABLE_SIGNUP) === 'true',
++  disableSso: (window.LAGO_DISABLE_SSO || LAGO_DISABLE_SSO) === 'true',
+   appVersion: APP_VERSION,
+   nangoPublicKey: window.NANGO_PUBLIC_KEY || NANGO_PUBLIC_KEY,
+   sentryDsn: window.SENTRY_DSN || SENTRY_DSN,
 diff --git a/src/layouts/MainNavLayout/MainNavMenuSections.tsx b/src/layouts/MainNavLayout/MainNavMenuSections.tsx
-index 8584c2781..be4d61c53 100644
+index 8584c27..be4d61c 100644
 --- a/src/layouts/MainNavLayout/MainNavMenuSections.tsx
 +++ b/src/layouts/MainNavLayout/MainNavMenuSections.tsx
 @@ -270,7 +270,7 @@ export const MainNavMenuSections = ({ isLoading, onItemClick }: MainNavMenuSecti
@@ -111,7 +175,7 @@ index 8584c2781..be4d61c53 100644
    const getAdminTabs = (): NavTab[] => [
      {
 diff --git a/src/main.tsx b/src/main.tsx
-index 985c83467..0639b2ee3 100644
+index 985c834..0639b2e 100644
 --- a/src/main.tsx
 +++ b/src/main.tsx
 @@ -1,80 +1,16 @@
@@ -198,3 +262,37 @@ index 985c83467..0639b2ee3 100644
  
  // A web worker (e.g. ace-builds' JSON linter) loads its script via
  // `importScripts` inside a blob URL. After a deploy re-hashes `/assets/*`, a
+diff --git a/src/pages/auth/Login.tsx b/src/pages/auth/Login.tsx
+index a0ed082..1d88003 100644
+--- a/src/pages/auth/Login.tsx
++++ b/src/pages/auth/Login.tsx
+@@ -28,7 +28,7 @@ import { Card, Page, StyledLogo } from '~/styles/auth'
+ 
+ import { loginDefaultValues, loginValidationSchema } from './loginForm/validationSchema'
+ 
+-const { disableSignUp } = envGlobalVar()
++const { disableSignUp, disableSso } = envGlobalVar()
+ 
+ gql`
+   mutation loginUser($input: LoginUserInput!) {
+@@ -135,7 +135,7 @@ const Login = () => {
+               </Alert>
+             )}
+ 
+-            {!isRunningInSalesForceIframe && !isRunningInIframeContext && (
++            {!disableSso && !isRunningInSalesForceIframe && !isRunningInIframeContext && (
+               <>
+                 <Stack spacing={4}>
+                   <GoogleAuthButton
+diff --git a/vite.config.ts b/vite.config.ts
+index 2c2dd57..9c6b969 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -121,6 +121,7 @@ export default defineConfig(({ mode }) => {
+       APP_VERSION: JSON.stringify(appVersion || version), // Fallback to package.json version when APP_VERSION env var is not set
+       LAGO_OAUTH_PROXY_URL: JSON.stringify(env.LAGO_OAUTH_PROXY_URL),
+       LAGO_DISABLE_SIGNUP: JSON.stringify(env.LAGO_DISABLE_SIGNUP),
++      LAGO_DISABLE_SSO: JSON.stringify(env.LAGO_DISABLE_SSO),
+       NANGO_PUBLIC_KEY: JSON.stringify(env.NANGO_PUBLIC_KEY),
+       SENTRY_DSN: JSON.stringify(env.SENTRY_DSN),
+       LAGO_DISABLE_PDF_GENERATION: JSON.stringify(env.LAGO_DISABLE_PDF_GENERATION),
