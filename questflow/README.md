@@ -51,6 +51,9 @@ for each release.
   configured or present, allowing the SDK to use Application Default
   Credentials. GKE Workload Identity, file access, and signed URLs require
   separate IAM configuration and have not yet been verified on GCP.
+- API key audit versions skip the key value while preserving the other audit
+  fields. Existing audit history is not rewritten, and the API key database
+  column itself remains sensitive.
 
 The test-only Stripe proxy is enabled only if both `QUESTFLOW_LAGO_POC=true` and
 `QUESTFLOW_STRIPE_PROXY` are set. Do not use that proxy or test credentials in

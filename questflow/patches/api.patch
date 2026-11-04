@@ -121,6 +121,18 @@ index 96e09b00187ebe55f5ce433b26a62778f4f21bc2..166655634539568fec1221b3ded994a2
      @pdfs_enabled = !ActiveModel::Type::Boolean.new.cast(ENV["LAGO_DISABLE_PDF_GENERATION"])
    end
  
+diff --git a/app/models/api_key.rb b/app/models/api_key.rb
+index f7f17f5efeedcd2c7b978f5f03c0327f1cf12e82..7bbdc04dd4aff75dec35bb22ece441dc7fbaebc7 100644
+--- a/app/models/api_key.rb
++++ b/app/models/api_key.rb
+@@ -2,6 +2,7 @@
+ 
+ class ApiKey < ApplicationRecord
+   include PaperTrailTraceable
++  paper_trail_options[:skip] = ["value"]
+ 
+   RESOURCES = %w[
+     activity_log add_on analytic api_log billable_metric coupon applied_coupon credit_note customer_usage
 diff --git a/config/initializers/analytics_ruby.rb b/config/initializers/analytics_ruby.rb
 index cc637a8cad71b301c455f67bcdcf4b35000d6053..803e720af0f588fa73e6886dc1c7a2993512c0df 100644
 --- a/config/initializers/analytics_ruby.rb
