@@ -1,0 +1,200 @@
+diff --git a/.dockerignore b/.dockerignore
+index c567ec2e0..454c47fe7 100644
+--- a/.dockerignore
++++ b/.dockerignore
+@@ -8,8 +8,16 @@ dist
+ 
+ # pnpm local store
+ .pnpm-store
++.npmrc
+ 
+ # Local dev config
++.env
++.env.*
++**/.env
++**/.env.*
++!.env.sh
++**/*.pem
++**/*.key
+ .vscode
+ .cursor
+ .env.template
+diff --git a/Dockerfile b/Dockerfile
+index b3a327eb7..e0c9840a5 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,4 +1,4 @@
+-# syntax=docker/dockerfile:1.28
++# syntax=docker/dockerfile:1.28@sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b
+ 
+ # Hardened Wolfi/apko image. Replaces the node:24-alpine -> nginx:1.31-alpine
+ # chain, which ran as root with a writable root filesystem. FROMs the bases
+@@ -50,17 +50,12 @@ ENV NODE_OPTIONS="--max-old-space-size=4096"
+ COPY --from=deps /app /app
+ COPY . .
+ 
+-# Late ARGs: an APP_VERSION change invalidates only `pnpm build`.
+-# SENTRY_AUTH_TOKEN is a secret mount, not an ARG: ARGs leak into the image
+-# history.
+-ARG SENTRY_DSN
+-ARG SENTRY_ORG
+-ARG SENTRY_FRONT_PROJECT
++# An APP_VERSION change invalidates only `pnpm build`. This fork does not
++# supply Sentry configuration or upload source maps during image builds.
+ ARG APP_VERSION
+ ENV APP_VERSION=$APP_VERSION
+ 
+-RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+-    pnpm build
++RUN pnpm build
+ 
+ 
+ # --- runtime stage: hardened Wolfi nginx -------------------------------------
+diff --git a/package.json b/package.json
+index e2d42f7f6..e39ef9c3e 100644
+--- a/package.json
++++ b/package.json
+@@ -196,13 +196,6 @@
+     "yup": "1.7.1",
+     "zod": "4.6.7"
+   },
+-  "pnpm": {
+-    "overrides": {
+-      "uuid": ">=14.0.0",
+-      "tmp": ">=0.2.6",
+-      "@graphql-tools/utils": "^12.1.0"
+-    }
+-  },
+   "engines": {
+     "node": "24.22.1"
+   },
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index 249995e5a..88dcc8e55 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -2,6 +2,11 @@ packages:
+   - 'packages/configs/'
+   - 'packages/design-system/'
+ 
++overrides:
++  uuid: '>=14.0.0'
++  tmp: '>=0.2.6'
++  '@graphql-tools/utils': ^12.1.0
++
+ # Supply-chain quarantine: a published version must be at least 7 days old
+ # (10080 minutes) before any resolution installs it. Applied at the package
+ # manager level so it also covers Renovate's weekly lockFileMaintenance
+diff --git a/src/components/admin/AdminGuard.tsx b/src/components/admin/AdminGuard.tsx
+index 9baa29226..8e3e9e802 100644
+--- a/src/components/admin/AdminGuard.tsx
++++ b/src/components/admin/AdminGuard.tsx
+@@ -7,7 +7,7 @@ const AdminGuard = () => {
+ 
+   if (loading) return null
+ 
+-  if (!currentUser?.csAdmin || !currentUser?.email?.endsWith('@getlago.com')) {
++  if (!currentUser?.csAdmin) {
+     return <Navigate to="/404" replace />
+   }
+ 
+diff --git a/src/layouts/MainNavLayout/MainNavMenuSections.tsx b/src/layouts/MainNavLayout/MainNavMenuSections.tsx
+index 8584c2781..be4d61c53 100644
+--- a/src/layouts/MainNavLayout/MainNavMenuSections.tsx
++++ b/src/layouts/MainNavLayout/MainNavMenuSections.tsx
+@@ -270,7 +270,7 @@ export const MainNavMenuSections = ({ isLoading, onItemClick }: MainNavMenuSecti
+     },
+   ]
+ 
+-  const isAdmin = !!currentUser?.csAdmin && !!currentUser?.email?.endsWith('@getlago.com')
++  const isAdmin = !!currentUser?.csAdmin
+ 
+   const getAdminTabs = (): NavTab[] => [
+     {
+diff --git a/src/main.tsx b/src/main.tsx
+index 985c83467..0639b2ee3 100644
+--- a/src/main.tsx
++++ b/src/main.tsx
+@@ -1,80 +1,16 @@
+-import * as Sentry from '@sentry/react'
+ import React from 'react'
+ import { createRoot } from 'react-dom/client'
+ 
+ import App from '~/App'
+ import { envGlobalVar } from '~/core/apolloClient'
+-import { AppEnvEnum } from '~/core/constants/globalTypes'
+ import { reportMissingAppEnv } from '~/core/utils/appEnv'
+ import { installLagoWindowApi } from '~/core/utils/featureFlagsConsole'
+-import {
+-  createWorkerLoadErrorHandler,
+-  dropRecoverableWorkerLoadEvent,
+-} from '~/core/utils/workerLoadRecovery'
++import { createWorkerLoadErrorHandler } from '~/core/utils/workerLoadRecovery'
+ 
+ import './main.css'
+ 
+-const { appEnv, sentryDsn, appVersion } = envGlobalVar()
+-
+-if (!!sentryDsn && appEnv !== AppEnvEnum.development) {
+-  Sentry.init({
+-    dsn: sentryDsn,
+-    integrations: [
+-      Sentry.browserTracingIntegration(),
+-      Sentry.replayIntegration({
+-        maskAllText: false,
+-        blockAllMedia: false,
+-        maskAllInputs: false,
+-      }),
+-    ],
+-    environment: appEnv,
+-    // Increase depth for nested objects (default is 3) to capture full GraphQL error details
+-    normalizeDepth: 10,
+-    // Increase max string length (default is 250) for error details
+-    maxValueLength: 2000,
+-    // Prevent sending recorded session if no error occurs
+-    replaysSessionSampleRate: 0.0,
+-    // Buffer (locally recorded) and send 30% of errors if one occurs
+-    replaysOnErrorSampleRate: 0.3,
+-    // Collect traces for 30% of sessions
+-    tracesSampleRate: 0.3,
+-    // Release tracking - essential for source maps
+-    release: appVersion,
+-    // Attach stack traces to all messages
+-    attachStacktrace: true,
+-    beforeSend: dropRecoverableWorkerLoadEvent,
+-    // Filter out common browser extension errors and noise
+-    ignoreErrors: [
+-      // Chrome extensions
+-      /chrome-extension:/i,
+-      /moz-extension:/i,
+-      // Safari extensions
+-      /safari-extension:/i,
+-      // Generic script errors from extensions
+-      /^Script error\.?$/i,
+-      /^Javascript error: Script error\.? on line 0$/i,
+-      // Apollo Client abort errors (user navigating away, component unmounting, etc.)
+-      // Matches "signal aborted", "AbortError: signal aborted", etc.
+-      /signal aborted/i,
+-      // Also catch generic AbortError messages
+-      'AbortError',
+-      // Browser extension / antivirus COM automation errors (Kaspersky, Norton, etc.)
+-      /Object Not Found Matching Id/i,
+-    ],
+-    // Deny URLs from browser extensions and other noise
+-    denyUrls: [
+-      // Chrome extensions
+-      /extensions\//i,
+-      /^chrome:\/\//i,
+-      /^chrome-extension:\/\//i,
+-      // Firefox extensions
+-      /^resource:\/\//i,
+-      /^moz-extension:\/\//i,
+-      // Safari extensions
+-      /^safari-extension:\/\//i,
+-    ],
+-  })
+-}
++// Questflow fork: no Sentry initialization or session replay.
++const { appEnv } = envGlobalVar()
+ 
+ // A web worker (e.g. ace-builds' JSON linter) loads its script via
+ // `importScripts` inside a blob URL. After a deploy re-hashes `/assets/*`, a

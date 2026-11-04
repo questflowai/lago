@@ -1,0 +1,272 @@
+diff --git a/.dockerignore b/.dockerignore
+index 0622cae02..89b24f05a 100644
+--- a/.dockerignore
++++ b/.dockerignore
+@@ -1,4 +1,18 @@
+ /tmp/*
++/log/*
++!/log/.keep
++/storage/*
++!/storage/.keep
++/.bundle
++.npmrc
++.env
++.env.*
++**/.env
++**/.env.*
++**/*.pem
++**/*.key
++config/master.key
++config/credentials/*.key
+ .rsa_private.pem
+ .rsa_public.pem
+ 
+@@ -7,7 +21,6 @@
+ .github
+ 
+ README.md
+-LICENSE
+ CODE_OF_CONDUCT.md
+ CONTRIBUTING.md
+ SECURITY.md
+diff --git a/Dockerfile b/Dockerfile
+index 0b56c569b..fd34dc9d8 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,4 +1,4 @@
+-# syntax=docker/dockerfile:1
++# syntax=docker/dockerfile:1.28@sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b
+ #
+ # Hardened Wolfi-based build for lago-api, and the only one. Every
+ # downstream build — staging, production and the OSS release — targets
+@@ -7,14 +7,16 @@
+ # Consumes two apko-built bases from https://github.com/getlago/lago-packages.
+ # Both are public, multi-arch and cosign-signed, so building this file needs no
+ # registry credentials:
+-#   - ghcr.io/getlago/lago-api-build:latest  — ruby-4-dev, rust, build-base, node
+-#   - ghcr.io/getlago/lago-api-base:latest   — ruby-4, jemalloc, libpq, pdfcpu, git
++#   - lago-api-build — ruby-4-dev, rust, build-base, node
++#   - lago-api-base  — ruby-4, jemalloc, libpq, pdfcpu, git
+ #
+ # The bases carry no shell history, no apt, no distro cruft; every package
+ # has an SBOM and is signed. This Dockerfile just bundles gems and copies code.
+ 
+-ARG BUILD_IMAGE=ghcr.io/getlago/lago-api-build:latest
+-ARG RUNTIME_IMAGE=ghcr.io/getlago/lago-api-base:latest
++# Pin the multi-platform manifests used to validate this fork. Upgrade both
++# images deliberately, rebuild, and verify the API and workers together.
++ARG BUILD_IMAGE=ghcr.io/getlago/lago-api-build@sha256:3cdff00432d17ad249e6c287acc59f640536d6b20679d57c3e9aecb709cf1c77
++ARG RUNTIME_IMAGE=ghcr.io/getlago/lago-api-base@sha256:3c96444e028c3086452182fcafb9e0c302f473fe9b41b99a1c51691afd88efdf
+ 
+ FROM ${BUILD_IMAGE} AS build
+ 
+@@ -35,19 +37,14 @@ COPY Gemfile Gemfile.lock ./
+ RUN gem install bundler --no-document -v "${BUNDLER_VERSION}"
+ 
+ RUN --mount=type=secret,id=BUNDLE_GEMS__CONTRIBSYS__COM,env=BUNDLE_GEMS__CONTRIBSYS__COM \
++    bundle config set --local frozen true && \
+     bundle config set --local build.nokogiri --use-system-libraries && \
+     bundle install --jobs=3 --retry=3
+ 
+ FROM ${RUNTIME_IMAGE}
+ 
+ ARG BUNDLE_WITH
+-ARG SEGMENT_WRITE_KEY
+-ARG GOCARDLESS_CLIENT_ID
+-ARG GOCARDLESS_CLIENT_SECRET
+-
+-ENV SEGMENT_WRITE_KEY=${SEGMENT_WRITE_KEY}
+-ENV GOCARDLESS_CLIENT_ID=${GOCARDLESS_CLIENT_ID}
+-ENV GOCARDLESS_CLIENT_SECRET=${GOCARDLESS_CLIENT_SECRET}
++# Payment-provider credentials are supplied at runtime, never baked into an image.
+ 
+ ENV BUNDLE_WITH=${BUNDLE_WITH:-}
+ ENV BUNDLE_WITHOUT="development test"
+@@ -68,7 +65,7 @@ USER nonroot
+ # mere argument of that entrypoint, which start.sh ignores. That is how
+ # v1.54.0 shipped an image where `migrate` silently booted Puma. The base no
+ # longer sets one, and this line keeps the contract true regardless of which
+-# revision of the floating `:latest` base this is built against.
++# selected runtime base.
+ # `ci/docker-boot-contract.sh` asserts it.
+ ENTRYPOINT []
+ 
+diff --git a/app/graphql/concerns/authenticable_admin_user.rb b/app/graphql/concerns/authenticable_admin_user.rb
+index ea15b3d68..376caa669 100644
+--- a/app/graphql/concerns/authenticable_admin_user.rb
++++ b/app/graphql/concerns/authenticable_admin_user.rb
+@@ -16,7 +16,9 @@ module AuthenticableAdminUser
+     raise unauthorized_error unless License.premium?
+     raise unauthorized_error unless context[:current_user]
+     raise unauthorized_error unless context[:current_user].cs_admin?
+-    raise unauthorized_error unless context[:current_user].email.end_with?("@getlago.com")
++    admin_domain = ENV["QUESTFLOW_ADMIN_EMAIL_DOMAIN"].to_s.strip.downcase
++    email = context[:current_user].email.to_s.downcase
++    raise unauthorized_error if admin_domain.blank? || email.rpartition("@")[1..] != ["@", admin_domain]
+     raise unauthorized_error if SSO_LOGIN_METHODS.include?(context[:login_method])
+ 
+     super
+diff --git a/app/mailers/application_mailer.rb b/app/mailers/application_mailer.rb
+index 96e09b001..166655634 100644
+--- a/app/mailers/application_mailer.rb
++++ b/app/mailers/application_mailer.rb
+@@ -8,8 +8,8 @@ class ApplicationMailer < ActionMailer::Base
+   before_action :set_shared_variables
+ 
+   def set_shared_variables
+-    @show_lago_logo = true
+-    @lago_logo_url = "https://assets.getlago.com/lago-logo-email.png"
++    @lago_logo_url = ENV["QUESTFLOW_EMAIL_LOGO_URL"].presence
++    @show_lago_logo = @lago_logo_url.present?
+     @pdfs_enabled = !ActiveModel::Type::Boolean.new.cast(ENV["LAGO_DISABLE_PDF_GENERATION"])
+   end
+ 
+diff --git a/config/initializers/analytics_ruby.rb b/config/initializers/analytics_ruby.rb
+index cc637a8ca..803e720af 100644
+--- a/config/initializers/analytics_ruby.rb
++++ b/config/initializers/analytics_ruby.rb
+@@ -1,25 +1,4 @@
+ # frozen_string_literal: true
+ 
+-unless ENV["LAGO_DISABLE_SEGMENT"] == "true"
+-  class SegmentError < StandardError
+-    attr_reader :status, :error_message, :message
+-
+-    def initialize(status, error_message)
+-      @status = status
+-      @error_message = error_message
+-      @message = "Status: #{status}, Message: #{error_message}"
+-
+-      super
+-    end
+-  end
+-
+-  Segment::Analytics::Logging.logger = Logger.new(nil)
+-
+-  SEGMENT_CLIENT = Segment::Analytics.new(
+-    {
+-      write_key: ENV.fetch("SEGMENT_WRITE_KEY", "changeme"),
+-      on_error: proc { |status, msg| defined?(Sentry) && Sentry.capture_exception(SegmentError.new(status, msg)) },
+-      stub: Rails.env.development? || Rails.env.test?
+-    }
+-  )
+-end
++# Questflow fork: Segment jobs check this flag before reporting analytics.
++ENV["LAGO_DISABLE_SEGMENT"] = "true"
+diff --git a/config/initializers/license.rb b/config/initializers/license.rb
+index 1aa7bae4b..373f9af0a 100644
+--- a/config/initializers/license.rb
++++ b/config/initializers/license.rb
+@@ -4,4 +4,9 @@ require "lago_utils"
+ 
+ License = LagoUtils::License.new(Rails.application.config.license_url)
+ 
+-License.verify unless Rails.env.test?
++if ENV["QUESTFLOW_LAGO_FORK_ENABLED"] == "true"
++  # Questflow's self-hosted fork does not call Lago's license service.
++  License.instance_variable_set(:@premium, true)
++else
++  License.verify unless Rails.env.test?
++end
+diff --git a/config/initializers/open_telemetry.rb b/config/initializers/open_telemetry.rb
+index e744394bc..51a8c6fbc 100644
+--- a/config/initializers/open_telemetry.rb
++++ b/config/initializers/open_telemetry.rb
+@@ -1,13 +1,6 @@
+ # frozen_string_literal: true
+ 
+ require "opentelemetry/sdk"
+-require "opentelemetry/instrumentation/all"
+-
+-# Set OTEL log level to ERROR in console, unless OTEL_LOG_LEVEL is set
+-if defined?(Rails::Console) && ENV["OTEL_LOG_LEVEL"].blank?
+-  OpenTelemetry.logger = Logger.new($stdout, level: Logger::ERROR)
+-end
+-
+-OpenTelemetry::SDK.configure(&:use_all) if ENV["OTEL_EXPORTER"].present?
+ 
++# Keep the tracer API available without installing an exporter.
+ LagoTracer = OpenTelemetry.tracer_provider.tracer("lago")
+diff --git a/config/initializers/sentry.rb b/config/initializers/sentry.rb
+index 7769c47fc..03a63a116 100644
+--- a/config/initializers/sentry.rb
++++ b/config/initializers/sentry.rb
+@@ -1,20 +1,3 @@
+ # frozen_string_literal: true
+ 
+-if ENV["SENTRY_DSN"].present?
+-  Sentry.init do |config|
+-    config.dsn = ENV["SENTRY_DSN"]
+-    config.release = LagoUtils::Version.call(default: Rails.env).sha_or_number
+-    config.breadcrumbs_logger = %i[active_support_logger http_logger]
+-    config.traces_sample_rate = 0
+-    config.traces_sample_rate = ENV["SENTRY_TRACES_SAMPLE_RATE"].to_f
+-    config.environment = ENV["SENTRY_ENVIRONMENT"] || Rails.env
+-
+-    # Sentry keeps every header but Authorization and Cookie, and the cable token travels in this one.
+-    drop_websocket_protocol = lambda do |event, _hint|
+-      event.request&.headers&.delete("Sec-Websocket-Protocol")
+-      event
+-    end
+-    config.before_send = drop_websocket_protocol
+-    config.before_send_transaction = drop_websocket_protocol
+-  end
+-end
++# Questflow fork: do not initialize the Sentry client.
+diff --git a/config/initializers/zz_questflow_stripe_test_proxy.rb b/config/initializers/zz_questflow_stripe_test_proxy.rb
+new file mode 100644
+index 000000000..2da1b82c9
+--- /dev/null
++++ b/config/initializers/zz_questflow_stripe_test_proxy.rb
+@@ -0,0 +1,7 @@
++# frozen_string_literal: true
++
++Stripe.enable_telemetry = false
++
++if ENV["QUESTFLOW_LAGO_POC"] == "true" && ENV["QUESTFLOW_STRIPE_PROXY"].present?
++  Stripe.proxy = ENV.fetch("QUESTFLOW_STRIPE_PROXY")
++end
+diff --git a/lib/lago/diagnostics.rb b/lib/lago/diagnostics.rb
+index 92bbade3d..60ed39eab 100644
+--- a/lib/lago/diagnostics.rb
++++ b/lib/lago/diagnostics.rb
+@@ -480,7 +480,7 @@ module Lago
+         fact("Cache sentinels", ENV["LAGO_REDIS_CACHE_SENTINELS"].present? ? "configured" : "(none)")
+         setting("Cache sentinel username", "LAGO_REDIS_CACHE_SENTINEL_USERNAME")
+         setting("Cache sentinel password", "LAGO_REDIS_CACHE_SENTINEL_PASSWORD")
+-        fact("SSL verify mode", "VERIFY_NONE")
++        fact("SSL verify mode", "VERIFY_PEER")
+         fact("Connection timeout", "1s")
+ 
+         output.puts
+diff --git a/lib/lago/redis_config_builder.rb b/lib/lago/redis_config_builder.rb
+index 46e8f3d2e..27d53ac35 100644
+--- a/lib/lago/redis_config_builder.rb
++++ b/lib/lago/redis_config_builder.rb
+@@ -71,7 +71,7 @@ module Lago
+       redis_config = {
+         url: ENV["REDIS_URL"].presence,
+         ssl_params: {
+-          verify_mode: OpenSSL::SSL::VERIFY_NONE
++          verify_mode: OpenSSL::SSL::VERIFY_PEER
+         },
+         timeout: 1
+       }.compact
+@@ -93,7 +93,7 @@ module Lago
+       redis_config = {
+         url: ENV["LAGO_REDIS_CACHE_URL"].presence,
+         ssl_params: {
+-          verify_mode: OpenSSL::SSL::VERIFY_NONE
++          verify_mode: OpenSSL::SSL::VERIFY_PEER
+         },
+         timeout: 1
+       }.compact
+@@ -118,7 +118,7 @@ module Lago
+       redis_config = {
+         url: dedicated ? ENV["LAGO_REDIS_THROTTLING_URL"] : ENV["REDIS_URL"].presence,
+         ssl_params: {
+-          verify_mode: OpenSSL::SSL::VERIFY_NONE
++          verify_mode: OpenSSL::SSL::VERIFY_PEER
+         },
+         timeout: 1
+       }.compact
