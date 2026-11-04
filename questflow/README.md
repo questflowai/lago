@@ -25,6 +25,8 @@ reviewed commit, applies the pinned patches, builds `linux/amd64` images and
 publishes them to the supplied Artifact Registry image references. Override
 `_REVISION`, `_API_IMAGE`, and `_FRONT_IMAGE` with release-specific values.
 Ensure the Cloud Build service account has the required registry permissions.
+Use a dedicated build service account with Cloud Logging writer permission;
+the pipeline sets `CLOUD_LOGGING_ONLY` for user-specified build identities.
 The build is not a production deployment and must be validated before use.
 
 The patches preserve the upstream submodule revisions in the enclosing commit.
